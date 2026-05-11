@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "harbor-slack-mcp",
+  "main": "src/cloudflare/worker.ts",
+  "compatibility_date": "2025-12-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "SLACK_OAUTH_STATE_TTL_SECONDS": "600"
+  },
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "03eb37d9a11d4bc0a98145f326ccf39e"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "harbor-slack-mcp",
+      "database_id": "902d1864-682e-428e-8a58-b5a224497b87"
+    }
+  ]
+}
