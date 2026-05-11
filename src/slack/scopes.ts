@@ -18,7 +18,7 @@ export function userScopesFromEnv(value: string | undefined): readonly string[] 
   return Array.from(
     new Set(
       slackTools
-        .filter((tool) => tool.annotations.token !== "admin")
+        .filter((tool) => tool.annotations.token !== "admin" && tool.annotations.token !== "bot")
         .flatMap((tool) => tool.annotations.scopes)
         .filter(isRealOAuthScope)
     )

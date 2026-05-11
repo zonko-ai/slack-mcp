@@ -17,6 +17,7 @@ describe("loadConfig", () => {
     const config = loadConfig({ SLACK_MCP_PORT: "13182" });
 
     expect(config.scopes.some((scope) => scope.startsWith("admin."))).toBe(false);
+    expect(config.scopes.some((scope) => scope.startsWith("remote_files:"))).toBe(false);
     expect(config.botScopes).toEqual(["remote_files:read", "remote_files:share", "remote_files:write"]);
   });
 });
