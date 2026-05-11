@@ -1,4 +1,5 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+import type { D1DatabaseLike } from "../src/cloudflare/d1-token-store.js";
 import { jsonSchemaToZodObject, readSlackMcpConnectionId } from "../src/cloudflare/mcp-adapter.js";
 import { createSlackMcpHttpHandler } from "../src/cloudflare/mcp-server.js";
 
@@ -21,6 +22,127 @@ class MemoryKvNamespace {
     this.entries.delete(key);
     this.expirations.delete(key);
   }
+}
+
+type SlackInstallationRow = {
+  readonly connection_id: string;
+  readonly team_id: string;
+  readonly team_name: string | null;
+  readonly enterprise_id: string | null;
+  readonly user_id: string;
+  readonly access_token_ciphertext: string;
+  readonly user_refresh_token_ciphertext: string | null;
+  readonly user_token_expires_at: string | null;
+  readonly bot_access_token_ciphertext: string | null;
+  readonly bot_refresh_token_ciphertext: string | null;
+  readonly bot_token_expires_at: string | null;
+  readonly scope: string;
+  readonly bot_scope: string | null;
+  readonly token_type: string;
+  readonly created_at: string;
+  readonly updated_at: string;
+};
+
+class SingleInstallationDb implements D1DatabaseLike {
+  constructor(private readonly row: SlackInstallationRow) {}
+
+  prepare() {
+    const statement = {
+      bind: () => statement,
+      first: async <T = unknown>() => this.row as T,
+      all: async <T = unknown>() => ({ results: [this.row as T] }),
+      run: async () => ({})
+    };
+    return {
+      ...statement
+    };
+  }
+}
+
+const tokenEncryptionKey = "0123456789abcdef0123456789abcdef";
+
+async function encryptedSlackToken(value: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    toArrayBuffer(new TextEncoder().encode(tokenEncryptionKey)),
+    "AES-GCM",
+    false,
+    ["encrypt", "decrypt"]
+  );
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = new Uint8Array(
+    await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv: toArrayBuffer(iv) },
+      key,
+      new TextEncoder().encode(value)
+    )
+  );
+  return JSON.stringify({
+    v: 1,
+    alg: "A256GCM",
+    iv: encodeBase64Url(iv),
+    ciphertext: encodeBase64Url(ciphertext)
+  });
+}
+
+async function slackInstallationRow(): Promise<SlackInstallationRow> {
+  const now = "2026-05-11T12:00:00.000Z";
+  return {
+    connection_id: "T123:U123",
+    team_id: "T123",
+    team_name: "Test Team",
+    enterprise_id: null,
+    user_id: "U123",
+    access_token_ciphertext: await encryptedSlackToken("xoxp-fake"),
+    user_refresh_token_ciphertext: null,
+    user_token_expires_at: null,
+    bot_access_token_ciphertext: null,
+    bot_refresh_token_ciphertext: null,
+    bot_token_expires_at: null,
+    scope: "auth.test,team:read",
+    bot_scope: null,
+    token_type: "user",
+    created_at: now,
+    updated_at: now
+  };
+}
+
+async function initializeSession(handler: (request: Request) => Promise<Response>): Promise<string> {
+  const initialized = await handler(
+    new Request("https://slack-mcp.example.com/mcp", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-11-25",
+          capabilities: {},
+          clientInfo: { name: "test", version: "0.1.0" }
+        }
+      })
+    })
+  );
+  expect(initialized.status).toBe(200);
+  const sessionId = initialized.headers.get("mcp-session-id");
+  expect(sessionId).toMatch(/^mcp-session-/);
+  return sessionId ?? "";
+}
+
+function encodeBase64Url(value: Uint8Array): string {
+  let binary = "";
+  for (const byte of value) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/u, "");
+}
+
+function toArrayBuffer(value: Uint8Array): ArrayBuffer {
+  return value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) as ArrayBuffer;
 }
 
 describe("Cloudflare MCP server adapter", () => {
@@ -58,7 +180,7 @@ describe("Cloudflare MCP server adapter", () => {
     expect(() => schema.parse({ limit: 10 })).toThrow();
   });
 
-  test("serves stateful Streamable HTTP sessions through the FastMCP edge transport", async () => {
+  test("serves stateful Streamable HTTP sessions with JSON-RPC responses", async () => {
     const sessionKv = new MemoryKvNamespace();
     const handler = createSlackMcpHttpHandler(
       {
@@ -231,5 +353,82 @@ describe("Cloudflare MCP server adapter", () => {
     );
 
     expect(expired.status).toBe(404);
+  });
+
+  test("returns a JSON-RPC object for tools/call", async () => {
+    const sessionKv = new MemoryKvNamespace();
+    const handler = createSlackMcpHttpHandler(
+      {
+        DB: new SingleInstallationDb(await slackInstallationRow()),
+        TOKEN_ENCRYPTION_KEY: tokenEncryptionKey,
+        SESSION_KV: sessionKv,
+        SLACK_MCP_SESSION_TTL_SECONDS: "60"
+      },
+      { connectionId: "T123:U123" }
+    );
+
+    const slackCalls: Array<{ readonly methodUrl: string; readonly authorization: string | null }> = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      slackCalls.push({
+        methodUrl: String(input),
+        authorization: headers.get("authorization")
+      });
+      return new Response(JSON.stringify({
+        ok: true,
+        team_id: "T123",
+        user_id: "U123"
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    try {
+      const sessionId = await initializeSession(handler);
+      const response = await handler(
+        new Request("https://slack-mcp.example.com/mcp", {
+          method: "POST",
+          headers: {
+            accept: "application/json",
+            "content-type": "application/json",
+            "mcp-session-id": sessionId,
+            "mcp-protocol-version": "2025-11-25"
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 2,
+            method: "tools/call",
+            params: {
+              name: "slack_auth_test",
+              arguments: {}
+            }
+          })
+        })
+      );
+
+      expect(response.status).toBe(200);
+      const body = await response.json() as {
+        readonly jsonrpc?: string;
+        readonly id?: number;
+        readonly result?: {
+          readonly isError?: boolean;
+          readonly content?: ReadonlyArray<{ readonly type?: string; readonly text?: string }>;
+        };
+      };
+      expect(Array.isArray(body)).toBe(false);
+      expect(body.jsonrpc).toBe("2.0");
+      expect(body.id).toBe(2);
+      expect(body.result?.isError).toBeUndefined();
+      expect(body.result?.content?.[0]?.text).toContain('"team_id": "T123"');
+      expect(slackCalls).toEqual([
+        {
+          methodUrl: "https://slack.com/api/auth.test",
+          authorization: "Bearer xoxp-fake"
+        }
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
