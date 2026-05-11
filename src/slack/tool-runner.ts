@@ -1,6 +1,12 @@
 import { SlackApiClient, SlackApiError } from "./client.js";
-import { findSlackTool } from "./tool-catalog.js";
-import type { TokenStore } from "./token-store.js";
+import { findSlackTool, type SlackTool } from "./tool-catalog.js";
+import type { SlackInstallation, SlackInstallationInput, TokenStore } from "./token-store.js";
+import {
+  refreshSlackToken,
+  shouldRefreshSlackToken,
+  SlackTokenRefreshError,
+  type SlackTokenRotationConfig
+} from "./token-rotation.js";
 
 export type ToolContent = {
   readonly type: "text";
@@ -15,6 +21,7 @@ export type ToolCallResult = {
 export type SlackToolRunnerOptions = {
   readonly tokenStore: TokenStore;
   readonly fetch?: typeof fetch;
+  readonly tokenRotation?: SlackTokenRotationConfig | undefined;
 };
 
 export type SlackToolCall = {
@@ -26,10 +33,12 @@ export type SlackToolCall = {
 export class SlackToolRunner {
   private readonly tokenStore: TokenStore;
   private readonly fetchImpl: typeof fetch | undefined;
+  private readonly tokenRotation: SlackTokenRotationConfig | undefined;
 
   constructor(options: SlackToolRunnerOptions) {
     this.tokenStore = options.tokenStore;
     this.fetchImpl = options.fetch;
+    this.tokenRotation = options.tokenRotation;
   }
 
   async callTool(call: SlackToolCall): Promise<ToolCallResult> {
@@ -48,14 +57,11 @@ export class SlackToolRunner {
       };
     }
 
-    const token = tool.annotations.token === "bot" && installation.botAccessToken
-      ? installation.botAccessToken
-      : installation.accessToken;
-    const client = new SlackApiClient(
-      this.fetchImpl === undefined ? { token } : { token, fetch: this.fetchImpl }
-    );
-
     try {
+      const token = await this.accessTokenForTool(tool, installation);
+      const client = new SlackApiClient(
+        this.fetchImpl === undefined ? { token } : { token, fetch: this.fetchImpl }
+      );
       const result = await client.call(tool.method, sanitizeArguments(call.arguments));
       return { content: [{ type: "text", text: JSON.stringify(redactSensitiveSlackData(result), null, 2) }] };
     } catch (error) {
@@ -79,10 +85,117 @@ export class SlackToolRunner {
           ]
         };
       }
+      if (error instanceof SlackTokenRefreshError) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  error: error.slackError,
+                  method: "oauth.v2.access"
+                },
+                null,
+                2
+              )
+            }
+          ]
+        };
+      }
       throw error;
     }
   }
+
+  private async accessTokenForTool(tool: SlackTool, installation: SlackInstallation): Promise<string> {
+    const selected = selectInstallationToken(tool, installation);
+    const tokenRotation = this.tokenRotation;
+    if (
+      !tokenRotation ||
+      !selected.refreshToken ||
+      !shouldRefreshSlackToken({
+        config: tokenRotation,
+        expiresAt: selected.expiresAt,
+        refreshToken: selected.refreshToken
+      })
+    ) {
+      return selected.accessToken;
+    }
+
+    const refreshed = await refreshSlackToken({
+      config: tokenRotation,
+      refreshToken: selected.refreshToken,
+      fetch: this.fetchImpl ?? defaultFetch
+    });
+    const saved = await this.tokenStore.save(
+      installationInputWithRefreshedToken(installation, selected.kind, refreshed)
+    );
+    return selected.kind === "bot" ? saved.botAccessToken ?? refreshed.accessToken : saved.accessToken;
+  }
 }
+
+type SelectedInstallationToken = {
+  readonly kind: "user" | "bot";
+  readonly accessToken: string;
+  readonly refreshToken?: string | undefined;
+  readonly expiresAt?: string | undefined;
+};
+
+type RefreshedInstallationToken = {
+  readonly accessToken: string;
+  readonly refreshToken: string;
+  readonly expiresAt: string;
+  readonly scope?: string | undefined;
+};
+
+function selectInstallationToken(tool: SlackTool, installation: SlackInstallation): SelectedInstallationToken {
+  if (tool.annotations.token === "bot" && installation.botAccessToken) {
+    return {
+      kind: "bot",
+      accessToken: installation.botAccessToken,
+      refreshToken: installation.botRefreshToken,
+      expiresAt: installation.botTokenExpiresAt
+    };
+  }
+
+  return {
+    kind: "user",
+    accessToken: installation.accessToken,
+    refreshToken: installation.userRefreshToken,
+    expiresAt: installation.userTokenExpiresAt
+  };
+}
+
+function installationInputWithRefreshedToken(
+  installation: SlackInstallation,
+  kind: "user" | "bot",
+  refreshed: RefreshedInstallationToken
+): SlackInstallationInput {
+  return {
+    teamId: installation.teamId,
+    teamName: installation.teamName,
+    enterpriseId: installation.enterpriseId,
+    userId: installation.userId,
+    accessToken: kind === "user" ? refreshed.accessToken : installation.accessToken,
+    ...optionalStringField("userRefreshToken", kind === "user" ? refreshed.refreshToken : installation.userRefreshToken),
+    ...optionalStringField("userTokenExpiresAt", kind === "user" ? refreshed.expiresAt : installation.userTokenExpiresAt),
+    ...optionalStringField("botAccessToken", kind === "bot" ? refreshed.accessToken : installation.botAccessToken),
+    ...optionalStringField("botRefreshToken", kind === "bot" ? refreshed.refreshToken : installation.botRefreshToken),
+    ...optionalStringField("botTokenExpiresAt", kind === "bot" ? refreshed.expiresAt : installation.botTokenExpiresAt),
+    scope: kind === "user" ? refreshed.scope ?? installation.scope : installation.scope,
+    ...optionalStringField("botScope", kind === "bot" ? refreshed.scope ?? installation.botScope : installation.botScope),
+    tokenType: installation.tokenType
+  };
+}
+
+function optionalStringField<Key extends keyof SlackInstallationInput>(
+  key: Key,
+  value: SlackInstallationInput[Key] | undefined
+): Partial<SlackInstallationInput> {
+  return typeof value === "string" ? { [key]: value } as Partial<SlackInstallationInput> : {};
+}
+
+const defaultFetch: typeof fetch = (input, init) => fetch(input, init);
 
 function sanitizeArguments(argumentsObject: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(

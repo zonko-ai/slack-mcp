@@ -8,13 +8,25 @@ import { SlackToolRunner } from "./slack/tool-runner.js";
 
 const config = loadConfig();
 const tokenStore = new FileTokenStore(config.tokenStorePath);
-const runner = new SlackToolRunner({ tokenStore });
+const runner = new SlackToolRunner({
+  tokenStore,
+  ...(config.clientId.trim() && config.clientSecret.trim()
+    ? {
+        tokenRotation: {
+          clientId: config.clientId,
+          clientSecret: config.clientSecret,
+          refreshWindowSeconds: config.tokenRefreshWindowSeconds
+        }
+      }
+    : {})
+});
 
 const mcpHandler = createMcpHandler({
   allowedOrigins: config.allowedOrigins,
   apiKey: config.apiKey,
   tools: slackTools,
-  callTool: (call) => runner.callTool(call)
+  callTool: (call) => runner.callTool(call),
+  sessionTtlSeconds: config.sessionTtlSeconds
 });
 
 const oauthHandler = createOAuthHandler({

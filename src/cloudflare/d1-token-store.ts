@@ -34,7 +34,11 @@ type SlackInstallationRow = {
   readonly enterprise_id: string | null;
   readonly user_id: string;
   readonly access_token_ciphertext: string;
+  readonly user_refresh_token_ciphertext: string | null;
+  readonly user_token_expires_at: string | null;
   readonly bot_access_token_ciphertext: string | null;
+  readonly bot_refresh_token_ciphertext: string | null;
+  readonly bot_token_expires_at: string | null;
   readonly scope: string;
   readonly bot_scope: string | null;
   readonly token_type: string;
@@ -56,7 +60,11 @@ const SELECT_INSTALLATION_COLUMNS = `
   enterprise_id,
   user_id,
   access_token_ciphertext,
+  user_refresh_token_ciphertext,
+  user_token_expires_at,
   bot_access_token_ciphertext,
+  bot_refresh_token_ciphertext,
+  bot_token_expires_at,
   scope,
   bot_scope,
   token_type,
@@ -79,8 +87,14 @@ export class D1TokenStore implements TokenStore {
     const now = this.now();
     const connectionId = `${input.teamId}:${input.userId}`;
     const accessTokenCiphertext = await this.encrypt(input.accessToken);
+    const userRefreshTokenCiphertext = input.userRefreshToken
+      ? await this.encrypt(input.userRefreshToken)
+      : null;
     const botAccessTokenCiphertext = input.botAccessToken
       ? await this.encrypt(input.botAccessToken)
+      : null;
+    const botRefreshTokenCiphertext = input.botRefreshToken
+      ? await this.encrypt(input.botRefreshToken)
       : null;
 
     await this.db
@@ -92,20 +106,28 @@ export class D1TokenStore implements TokenStore {
           enterprise_id,
           user_id,
           access_token_ciphertext,
+          user_refresh_token_ciphertext,
+          user_token_expires_at,
           bot_access_token_ciphertext,
+          bot_refresh_token_ciphertext,
+          bot_token_expires_at,
           scope,
           bot_scope,
           token_type,
           created_at,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(connection_id) DO UPDATE SET
           team_id = excluded.team_id,
           team_name = excluded.team_name,
           enterprise_id = excluded.enterprise_id,
           user_id = excluded.user_id,
           access_token_ciphertext = excluded.access_token_ciphertext,
+          user_refresh_token_ciphertext = excluded.user_refresh_token_ciphertext,
+          user_token_expires_at = excluded.user_token_expires_at,
           bot_access_token_ciphertext = excluded.bot_access_token_ciphertext,
+          bot_refresh_token_ciphertext = excluded.bot_refresh_token_ciphertext,
+          bot_token_expires_at = excluded.bot_token_expires_at,
           scope = excluded.scope,
           bot_scope = excluded.bot_scope,
           token_type = excluded.token_type,
@@ -118,7 +140,11 @@ export class D1TokenStore implements TokenStore {
         input.enterpriseId,
         input.userId,
         accessTokenCiphertext,
+        userRefreshTokenCiphertext,
+        input.userTokenExpiresAt ?? null,
         botAccessTokenCiphertext,
+        botRefreshTokenCiphertext,
+        input.botTokenExpiresAt ?? null,
         input.scope,
         input.botScope ?? null,
         input.tokenType,
@@ -177,8 +203,14 @@ export class D1TokenStore implements TokenStore {
 
   private async rowToInstallation(row: SlackInstallationRow): Promise<SlackInstallation> {
     const accessToken = await this.decrypt(row.access_token_ciphertext);
+    const userRefreshToken = row.user_refresh_token_ciphertext
+      ? await this.decrypt(row.user_refresh_token_ciphertext)
+      : undefined;
     const botAccessToken = row.bot_access_token_ciphertext
       ? await this.decrypt(row.bot_access_token_ciphertext)
+      : undefined;
+    const botRefreshToken = row.bot_refresh_token_ciphertext
+      ? await this.decrypt(row.bot_refresh_token_ciphertext)
       : undefined;
 
     return {
@@ -188,7 +220,11 @@ export class D1TokenStore implements TokenStore {
       enterpriseId: row.enterprise_id,
       userId: row.user_id,
       accessToken,
+      ...(userRefreshToken === undefined ? {} : { userRefreshToken }),
+      ...(row.user_token_expires_at === null ? {} : { userTokenExpiresAt: row.user_token_expires_at }),
       ...(botAccessToken === undefined ? {} : { botAccessToken }),
+      ...(botRefreshToken === undefined ? {} : { botRefreshToken }),
+      ...(row.bot_token_expires_at === null ? {} : { botTokenExpiresAt: row.bot_token_expires_at }),
       scope: row.scope,
       ...(row.bot_scope === null ? {} : { botScope: row.bot_scope }),
       tokenType: parseTokenType(row.token_type),

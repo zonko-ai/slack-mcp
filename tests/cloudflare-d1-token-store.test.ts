@@ -9,7 +9,11 @@ type D1Row = {
   enterprise_id: string | null;
   user_id: string;
   access_token_ciphertext: string;
+  user_refresh_token_ciphertext: string | null;
+  user_token_expires_at: string | null;
   bot_access_token_ciphertext: string | null;
+  bot_refresh_token_ciphertext: string | null;
+  bot_token_expires_at: string | null;
   scope: string;
   bot_scope: string | null;
   token_type: string;
@@ -49,7 +53,11 @@ class MemoryD1Statement {
       enterprise_id,
       user_id,
       access_token_ciphertext,
+      user_refresh_token_ciphertext,
+      user_token_expires_at,
       bot_access_token_ciphertext,
+      bot_refresh_token_ciphertext,
+      bot_token_expires_at,
       scope,
       bot_scope,
       token_type,
@@ -62,6 +70,10 @@ class MemoryD1Statement {
       string | null,
       string,
       string,
+      string | null,
+      string | null,
+      string | null,
+      string | null,
       string | null,
       string,
       string | null,
@@ -76,7 +88,11 @@ class MemoryD1Statement {
       enterprise_id,
       user_id,
       access_token_ciphertext,
+      user_refresh_token_ciphertext,
+      user_token_expires_at,
       bot_access_token_ciphertext,
+      bot_refresh_token_ciphertext,
+      bot_token_expires_at,
       scope,
       bot_scope,
       token_type,
@@ -117,7 +133,11 @@ function installation(overrides: Partial<SlackInstallationInput> = {}): SlackIns
     enterpriseId: null,
     userId: "U123",
     accessToken: "xoxp-user-secret",
+    userRefreshToken: "xoxe-user-refresh-secret",
+    userTokenExpiresAt: "2026-05-12T00:00:00.000Z",
     botAccessToken: "xoxb-bot-secret",
+    botRefreshToken: "xoxe-bot-refresh-secret",
+    botTokenExpiresAt: "2026-05-12T00:00:00.000Z",
     scope: "channels:read,chat:write",
     botScope: "commands,chat:write",
     tokenType: "user",
@@ -140,12 +160,18 @@ describe("D1TokenStore", () => {
     const raw = db.rows.get("T123:U123");
     expect(raw).toBeTruthy();
     expect(raw?.access_token_ciphertext).not.toContain("xoxp-user-secret");
+    expect(raw?.user_refresh_token_ciphertext).not.toContain("xoxe-user-refresh-secret");
     expect(raw?.bot_access_token_ciphertext).not.toContain("xoxb-bot-secret");
+    expect(raw?.bot_refresh_token_ciphertext).not.toContain("xoxe-bot-refresh-secret");
 
     await expect(store.get("T123:U123")).resolves.toMatchObject({
       connectionId: "T123:U123",
       accessToken: "xoxp-user-secret",
+      userRefreshToken: "xoxe-user-refresh-secret",
+      userTokenExpiresAt: "2026-05-12T00:00:00.000Z",
       botAccessToken: "xoxb-bot-secret",
+      botRefreshToken: "xoxe-bot-refresh-secret",
+      botTokenExpiresAt: "2026-05-12T00:00:00.000Z",
       teamName: "Example"
     });
   });

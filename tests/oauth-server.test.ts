@@ -50,6 +50,8 @@ describe("OAuth HTTP handler", () => {
         JSON.stringify({
           ok: true,
           access_token: "xoxb-bot",
+          refresh_token: "xoxe-bot-refresh",
+          expires_in: 43200,
           authed_user: { id: "U123", access_token: "xoxp-user", scope: "channels:read,chat:write" },
           team: { id: "T123", name: "Example" },
           enterprise: null,
@@ -93,6 +95,8 @@ describe("OAuth HTTP handler", () => {
       userId: "U123",
       accessToken: "xoxp-user",
       botAccessToken: "xoxb-bot",
+      botRefreshToken: "xoxe-bot-refresh",
+      botTokenExpiresAt: expect.any(String),
       scope: "channels:read,chat:write",
       botScope: "commands",
       tokenType: "user"

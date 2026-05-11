@@ -12,10 +12,14 @@ export type SlackOAuthAccessResponse = {
   readonly ok?: boolean;
   readonly error?: string;
   readonly access_token?: string;
+  readonly refresh_token?: string;
+  readonly expires_in?: number;
   readonly scope?: string;
   readonly authed_user?: {
     readonly id?: string;
     readonly access_token?: string;
+    readonly refresh_token?: string;
+    readonly expires_in?: number;
     readonly scope?: string;
   };
   readonly team?: {
@@ -81,9 +85,26 @@ export function installationFromSlackOAuthResponse(
     enterpriseId: data.enterprise?.id ?? null,
     userId,
     accessToken,
+    ...tokenRotationFields("user", data.authed_user?.refresh_token, data.authed_user?.expires_in),
     botAccessToken: data.access_token,
+    ...tokenRotationFields("bot", data.refresh_token, data.expires_in),
     scope: data.authed_user?.scope ?? fallbackUserScope.join(","),
     botScope: data.scope,
     tokenType: "user"
   };
+}
+
+function tokenRotationFields(
+  tokenKind: "user" | "bot",
+  refreshToken: string | undefined,
+  expiresInSeconds: number | undefined
+): Partial<SlackInstallationInput> {
+  const fields: Record<string, string> = {};
+  if (refreshToken?.trim()) {
+    fields[`${tokenKind}RefreshToken`] = refreshToken;
+  }
+  if (typeof expiresInSeconds === "number" && Number.isFinite(expiresInSeconds) && expiresInSeconds > 0) {
+    fields[`${tokenKind}TokenExpiresAt`] = new Date(Date.now() + expiresInSeconds * 1000).toISOString();
+  }
+  return fields as Partial<SlackInstallationInput>;
 }

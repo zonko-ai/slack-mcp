@@ -8,8 +8,8 @@
     "start": "node dist/src/index.js",
     "build": "tsc -p tsconfig.json",
     "deploy": "wrangler deploy --config wrangler.jsonc",
-    "db:migrate:local": "wrangler d1 migrations apply harbor-slack-mcp --local --config wrangler.jsonc",
-    "db:migrate:remote": "wrangler d1 migrations apply harbor-slack-mcp --remote --config wrangler.jsonc",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local --config wrangler.jsonc",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote --config wrangler.jsonc",
     "test": "vitest run",
     "test:live-tools": "tsx src/testing/test-all-tools.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -20,7 +20,7 @@
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^0.5.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "agents": "^0.12.3",
+    "fastmcp": "^4.0.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {

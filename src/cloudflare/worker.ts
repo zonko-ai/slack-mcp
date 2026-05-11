@@ -2,6 +2,7 @@ import { OAuthProvider, type AuthRequest, type OAuthHelpers } from "@cloudflare/
 import type { ExecutionContext } from "@cloudflare/workers-types";
 import { createSlackMcpHttpHandler, type SlackMcpRuntimeEnv } from "./mcp-server.js";
 import { D1TokenStore } from "./d1-token-store.js";
+import { readSlackMcpConnectionId } from "./mcp-adapter.js";
 import { SlackOAuthStateStore, type KvNamespaceLike } from "./slack-oauth-state.js";
 import {
   buildSlackAuthorizeUrl,
@@ -12,7 +13,7 @@ import {
 import { botScopesFromEnv, splitCsv, userScopesFromEnv } from "../slack/scopes.js";
 import { slackOauthSubjectId } from "./oauth-subject.js";
 
-type CloudflareSlackMcpEnv = SlackMcpRuntimeEnv & {
+type CloudflareSlackMcpEnv = Omit<SlackMcpRuntimeEnv, "SESSION_KV"> & {
   readonly OAUTH_KV: KvNamespaceLike;
   readonly OAUTH_PROVIDER: OAuthHelpers;
   readonly SLACK_CLIENT_ID: string;
@@ -24,7 +25,8 @@ type CloudflareSlackMcpEnv = SlackMcpRuntimeEnv & {
   readonly SLACK_MCP_ALLOWED_ORIGINS?: string | undefined;
 };
 
-const MCP_OAUTH_SCOPES = ["slack:standard", "slack:admin"];
+const DEFAULT_MCP_OAUTH_SCOPE = "slack";
+const MCP_OAUTH_SCOPES = [DEFAULT_MCP_OAUTH_SCOPE];
 
 const apiHandler = {
   async fetch(request: Request, env: CloudflareSlackMcpEnv, ctx: ExecutionContext): Promise<Response> {
@@ -32,7 +34,9 @@ const apiHandler = {
     if (originError) {
       return originError;
     }
-    return createSlackMcpHttpHandler(env)(request, env, ctx);
+    return createSlackMcpHttpHandler({ ...env, SESSION_KV: env.OAUTH_KV }, {
+      connectionId: readSlackMcpConnectionId(readOAuthProviderProps(ctx))
+    })(request);
   }
 };
 
@@ -42,7 +46,7 @@ const defaultHandler = {
 
     if (url.pathname === "/") {
       return jsonResponse(200, {
-        name: "Harbor Slack MCP",
+        name: "Slack MCP",
         mcp: `${url.origin}/mcp`,
         authorize: `${url.origin}/authorize`,
         token: `${url.origin}/token`,
@@ -53,7 +57,7 @@ const defaultHandler = {
     if (url.pathname === "/healthz") {
       return jsonResponse(200, {
         ok: true,
-        service: "harbor-slack-mcp",
+          service: "slack-mcp",
         storage: {
           d1: Boolean(env.DB),
           oauthKv: Boolean(env.OAUTH_KV)
@@ -197,6 +201,11 @@ function slackOAuthConfig(env: CloudflareSlackMcpEnv, request: Request): SlackOA
   };
 }
 
+function readOAuthProviderProps(ctx: ExecutionContext): Record<string, unknown> | undefined {
+  const props = (ctx as ExecutionContext & { readonly props?: unknown }).props;
+  return typeof props === "object" && props !== null ? props as Record<string, unknown> : undefined;
+}
+
 function requiredEnv(value: string | undefined, name: string): string {
   if (!value?.trim()) {
     throw new Error(`${name} is required`);
@@ -214,7 +223,7 @@ function assertSupportedMcpScopes(oauthRequest: AuthRequest): void {
 function grantedMcpScopes(requestedScopes: readonly string[]): string[] {
   return requestedScopes.length > 0
     ? requestedScopes.filter((scope) => MCP_OAUTH_SCOPES.includes(scope))
-    : ["slack:standard"];
+    : [DEFAULT_MCP_OAUTH_SCOPE];
 }
 
 function oauthStateTtlSeconds(env: CloudflareSlackMcpEnv): number {

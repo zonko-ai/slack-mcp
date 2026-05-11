@@ -9,7 +9,11 @@ export type SlackInstallationInput = {
   readonly enterpriseId: string | null;
   readonly userId: string;
   readonly accessToken: string;
+  readonly userRefreshToken?: string | undefined;
+  readonly userTokenExpiresAt?: string | undefined;
   readonly botAccessToken?: string | undefined;
+  readonly botRefreshToken?: string | undefined;
+  readonly botTokenExpiresAt?: string | undefined;
   readonly scope: string;
   readonly botScope?: string | undefined;
   readonly tokenType: SlackTokenType;
@@ -23,7 +27,14 @@ export type SlackInstallation = SlackInstallationInput & {
 
 export type SlackInstallationSummary = Omit<
   SlackInstallation,
-  "accessToken" | "botAccessToken" | "createdAt" | "updatedAt" | "enterpriseId" | "botScope"
+  | "accessToken"
+  | "userRefreshToken"
+  | "botAccessToken"
+  | "botRefreshToken"
+  | "createdAt"
+  | "updatedAt"
+  | "enterpriseId"
+  | "botScope"
 >;
 
 export interface TokenStore {

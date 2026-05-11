@@ -39,7 +39,7 @@ const ctx: TestContext = {
   endpoint,
   authorizationToken,
   sessionId: await initialize(endpoint, authorizationToken),
-  remoteFileExternalId: `harbor-slack-mcp-${runId}`
+  remoteFileExternalId: `slack-mcp-${runId}`
 };
 
 const results: ToolResult[] = [];

@@ -11,17 +11,36 @@ type JsonRpcRequest = {
 
 type McpHandlerOptions = {
   readonly allowedOrigins: readonly string[];
-  readonly apiKey: string | null;
+  readonly apiKey: string;
   readonly tools: readonly SlackTool[];
   readonly callTool: (call: {
     readonly name: string;
     readonly arguments: Record<string, unknown>;
     readonly connectionId?: string | null | undefined;
   }) => Promise<ToolCallResult>;
+  readonly sessionTtlSeconds?: number | undefined;
+  readonly now?: (() => number) | undefined;
 };
 
 export function createMcpHandler(options: McpHandlerOptions): (request: Request) => Promise<Response> {
-  const sessions = new Set<string>();
+  const sessions = new Map<string, { expiresAt: number }>();
+  const sessionTtlMs = normalizeSessionTtlSeconds(options.sessionTtlSeconds ?? 3600) * 1000;
+  const now = options.now ?? (() => Date.now());
+
+  function validateSession(sessionId: string | null, id: string | number | null): Response | null {
+    if (!sessionId) {
+      return jsonResponse(400, jsonRpcError(id, -32000, "Missing MCP session id"));
+    }
+
+    const session = sessions.get(sessionId);
+    if (!session || session.expiresAt <= now()) {
+      sessions.delete(sessionId);
+      return jsonResponse(404, jsonRpcError(id, -32001, "Session not found"));
+    }
+
+    session.expiresAt = now() + sessionTtlMs;
+    return null;
+  }
 
   return async function handleMcp(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -34,18 +53,23 @@ export function createMcpHandler(options: McpHandlerOptions): (request: Request)
       return textResponse(403, "Forbidden origin");
     }
 
-    if (options.apiKey) {
-      const expected = `Bearer ${options.apiKey}`;
-      if (request.headers.get("authorization") !== expected) {
-        return textResponse(401, "Unauthorized");
-      }
+    const expected = `Bearer ${options.apiKey}`;
+    if (request.headers.get("authorization") !== expected) {
+      return textResponse(401, "Unauthorized");
     }
 
     if (request.method === "GET") {
-      if (!request.headers.get("accept")?.includes("text/event-stream")) {
-        return textResponse(405, "Method not allowed");
+      return textResponse(405, "Method not allowed");
+    }
+
+    if (request.method === "DELETE") {
+      const sessionId = request.headers.get("mcp-session-id");
+      const sessionError = validateSession(sessionId, null);
+      if (sessionError) {
+        return sessionError;
       }
-      return sseResponse();
+      sessions.delete(sessionId ?? "");
+      return new Response(null, { status: 204 });
     }
 
     if (request.method !== "POST") {
@@ -60,8 +84,11 @@ export function createMcpHandler(options: McpHandlerOptions): (request: Request)
     }
 
     if (payload.method === "initialize") {
+      if (request.headers.get("mcp-session-id")) {
+        return jsonResponse(400, jsonRpcError(payload.id ?? null, -32600, "Initialization requests must not include an MCP session id"));
+      }
       const sessionId = `mcp-session-${randomUUID()}`;
-      sessions.add(sessionId);
+      sessions.set(sessionId, { expiresAt: now() + sessionTtlMs });
       return jsonResponse(
         200,
         {
@@ -74,7 +101,7 @@ export function createMcpHandler(options: McpHandlerOptions): (request: Request)
               tools: { listChanged: true }
             },
             serverInfo: {
-              name: "Harbor Slack MCP",
+              name: "Slack MCP",
               version: "0.1.0"
             }
           }
@@ -83,12 +110,9 @@ export function createMcpHandler(options: McpHandlerOptions): (request: Request)
       );
     }
 
-    const sessionId = request.headers.get("mcp-session-id");
-    if (!sessionId) {
-      return jsonResponse(400, jsonRpcError(payload.id ?? null, -32000, "Missing MCP session id"));
-    }
-    if (!sessions.has(sessionId)) {
-      return jsonResponse(404, jsonRpcError(payload.id ?? null, -32000, "Invalid MCP session id"));
+    const sessionError = validateSession(request.headers.get("mcp-session-id"), payload.id ?? null);
+    if (sessionError) {
+      return sessionError;
     }
 
     if (payload.method === "notifications/initialized") {
@@ -130,6 +154,10 @@ export function createMcpHandler(options: McpHandlerOptions): (request: Request)
   };
 }
 
+function normalizeSessionTtlSeconds(value: number): number {
+  return Number.isInteger(value) && value > 0 ? value : 3600;
+}
+
 function parseToolCallParams(params: unknown): { readonly name: string; readonly arguments: Record<string, unknown> } | null {
   if (typeof params !== "object" || params === null) {
     return null;
@@ -168,22 +196,5 @@ function textResponse(status: number, body: string): Response {
   return new Response(body, {
     status,
     headers: { "content-type": "text/plain; charset=utf-8" }
-  });
-}
-
-function sseResponse(): Response {
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(encoder.encode(": ready\n\n"));
-    }
-  });
-  return new Response(stream, {
-    status: 200,
-    headers: {
-      "content-type": "text/event-stream",
-      "cache-control": "no-cache",
-      connection: "keep-alive"
-    }
   });
 }

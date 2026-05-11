@@ -28,7 +28,7 @@ describe("SlackOAuthStateStore", () => {
     const oauthRequest = {
       clientId: "mcp-client",
       redirectUri: "http://localhost/callback",
-      scope: "slack:standard",
+      scope: "slack",
       state: "client-state"
     };
 
