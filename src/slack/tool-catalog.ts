@@ -38,17 +38,26 @@ type FieldName =
   | "join_url"
   | "latest"
   | "limit"
+  | "link"
   | "description"
+  | "bookmark_id"
   | "message_ts"
   | "name"
   | "oldest"
+  | "num_minutes"
   | "post_at"
+  | "presence"
+  | "profile"
+  | "purpose"
   | "query"
+  | "channel_id"
+  | "external_unique_id"
   | "reminder"
   | "scheduled_message_id"
   | "team_id"
   | "text"
   | "time"
+  | "type"
   | "timestamp"
   | "title"
   | "topic"
@@ -79,17 +88,26 @@ const fieldSchemas: Record<FieldName, unknown> = {
   join_url: { type: "string", description: "Call join URL." },
   latest: { type: "string", description: "Latest timestamp bound." },
   limit: { type: "number", description: "Maximum number of records to return." },
+  link: { type: "string", description: "Slack bookmark link URL." },
   description: { type: "string", description: "Description text." },
+  bookmark_id: { type: "string", description: "Slack bookmark id." },
   message_ts: { type: "string", description: "Slack message timestamp." },
   name: { type: "string", description: "Name for a Slack object." },
   oldest: { type: "string", description: "Oldest timestamp bound." },
+  num_minutes: { type: "number", description: "Number of minutes." },
   post_at: { type: "number", description: "Unix timestamp for scheduled delivery." },
+  presence: { type: "string", description: "Slack presence value." },
+  profile: { type: "string", description: "JSON-encoded Slack profile object." },
+  purpose: { type: "string", description: "Slack channel purpose text." },
   query: { type: "string", description: "Search query." },
+  channel_id: { type: "string", description: "Slack channel id." },
+  external_unique_id: { type: "string", description: "External unique call id." },
   reminder: { type: "string", description: "Slack reminder id." },
   scheduled_message_id: { type: "string", description: "Scheduled message id." },
   team_id: { type: "string", description: "Slack team id." },
   text: { type: "string", description: "Plain text content." },
   time: { type: "string", description: "Reminder time, timestamp, or natural language time." },
+  type: { type: "string", description: "Slack object type." },
   timestamp: { type: "string", description: "Slack message timestamp." },
   title: { type: "string", description: "Title." },
   topic: { type: "string", description: "Conversation topic or purpose text." },
@@ -156,9 +174,9 @@ export const slackTools: readonly SlackTool[] = [
   tool("slack_users_info", "users.info", "Retrieve detailed information for a Slack user.", ["users:read"], ["user"], ["user"], { token: "either", readOnlyHint: true }),
   tool("slack_users_lookup_by_email", "users.lookupByEmail", "Find a Slack user by email address.", ["users:read.email"], ["email"], ["email"], { token: "either", readOnlyHint: true }),
   tool("slack_users_get_presence", "users.getPresence", "Retrieve realtime presence for a Slack user.", ["users:read"], ["user"], ["user"], { token: "user", readOnlyHint: true }),
-  tool("slack_users_set_presence", "users.setPresence", "Set the authenticated user's Slack presence.", ["users:write"], ["name"], ["name"], { token: "user", readOnlyHint: false }),
+  tool("slack_users_set_presence", "users.setPresence", "Set the authenticated user's Slack presence.", ["users:write"], ["presence"], ["presence"], { token: "user", readOnlyHint: false }),
   tool("slack_users_profile_get", "users.profile.get", "Retrieve a Slack user's profile fields.", ["users.profile:read"], ["user"], [], { token: "user", readOnlyHint: true }),
-  tool("slack_users_profile_set", "users.profile.set", "Update the authenticated user's Slack profile fields.", ["users.profile:write"], ["user"], [], { token: "user", readOnlyHint: false }),
+  tool("slack_users_profile_set", "users.profile.set", "Update the authenticated user's Slack profile fields.", ["users.profile:write"], ["user", "profile"], ["profile"], { token: "user", readOnlyHint: false }),
   tool("slack_users_delete_photo", "users.deletePhoto", "Delete the authenticated user's Slack profile photo.", ["users.profile:write"], [], [], { token: "user", readOnlyHint: false, destructiveHint: true }),
 
   tool("slack_conversations_list", "conversations.list", "List public channels, private channels, DMs, and MPIMs visible to the token.", ["channels:read", "groups:read", "im:read", "mpim:read"], ["cursor", "limit", "types"], [], { token: "either", readOnlyHint: true }),
@@ -177,7 +195,7 @@ export const slackTools: readonly SlackTool[] = [
   tool("slack_conversations_kick", "conversations.kick", "Remove a user from a Slack conversation.", ["channels:write", "groups:write"], ["channel", "user"], ["channel", "user"], { token: "either", readOnlyHint: false, destructiveHint: true }),
   tool("slack_conversations_rename", "conversations.rename", "Rename a Slack conversation.", ["channels:write", "groups:write"], ["channel", "name"], ["channel", "name"], { token: "either", readOnlyHint: false }),
   tool("slack_conversations_set_topic", "conversations.setTopic", "Set the topic for a Slack conversation.", ["channels:write", "groups:write"], ["channel", "topic"], ["channel", "topic"], { token: "either", readOnlyHint: false }),
-  tool("slack_conversations_set_purpose", "conversations.setPurpose", "Set the purpose for a Slack conversation.", ["channels:write", "groups:write"], ["channel", "topic"], ["channel", "topic"], { token: "either", readOnlyHint: false }),
+  tool("slack_conversations_set_purpose", "conversations.setPurpose", "Set the purpose for a Slack conversation.", ["channels:write", "groups:write"], ["channel", "purpose"], ["channel", "purpose"], { token: "either", readOnlyHint: false }),
   tool("slack_conversations_mark", "conversations.mark", "Set the read cursor in a Slack conversation.", ["channels:history", "groups:history", "im:history", "mpim:history"], ["channel", "ts"], ["channel", "ts"], { token: "user", readOnlyHint: false }),
 
   tool("slack_chat_post_message", "chat.postMessage", "Send a message to a Slack channel, DM, or private conversation.", ["chat:write"], ["channel", "text", "blocks", "attachments"], ["channel"], { token: "either", readOnlyHint: false }),
@@ -224,10 +242,10 @@ export const slackTools: readonly SlackTool[] = [
   tool("slack_stars_remove", "stars.remove", "Remove a star from a Slack item.", ["stars:write"], ["channel", "timestamp", "file"], [], { token: "user", readOnlyHint: false, destructiveHint: true }),
   tool("slack_stars_list", "stars.list", "List starred Slack items.", ["stars:read"], ["cursor", "limit"], [], { token: "user", readOnlyHint: true }),
 
-  tool("slack_bookmarks_list", "bookmarks.list", "List bookmarks in a Slack channel.", ["bookmarks:read"], ["channel"], ["channel"], { token: "either", readOnlyHint: true }),
-  tool("slack_bookmarks_add", "bookmarks.add", "Add a bookmark to a Slack channel.", ["bookmarks:write"], ["channel", "title", "url"], ["channel", "title"], { token: "either", readOnlyHint: false }),
-  tool("slack_bookmarks_edit", "bookmarks.edit", "Edit a bookmark in a Slack channel.", ["bookmarks:write"], ["channel", "id", "title", "url"], ["channel", "id"], { token: "either", readOnlyHint: false }),
-  tool("slack_bookmarks_remove", "bookmarks.remove", "Remove a bookmark from a Slack channel.", ["bookmarks:write"], ["channel", "id"], ["channel", "id"], { token: "either", readOnlyHint: false, destructiveHint: true }),
+  tool("slack_bookmarks_list", "bookmarks.list", "List bookmarks in a Slack channel.", ["bookmarks:read"], ["channel_id"], ["channel_id"], { token: "either", readOnlyHint: true }),
+  tool("slack_bookmarks_add", "bookmarks.add", "Add a bookmark to a Slack channel.", ["bookmarks:write"], ["channel_id", "title", "type", "link"], ["channel_id", "title", "type"], { token: "either", readOnlyHint: false }),
+  tool("slack_bookmarks_edit", "bookmarks.edit", "Edit a bookmark in a Slack channel.", ["bookmarks:write"], ["channel_id", "bookmark_id", "title", "link"], ["channel_id", "bookmark_id"], { token: "either", readOnlyHint: false }),
+  tool("slack_bookmarks_remove", "bookmarks.remove", "Remove a bookmark from a Slack channel.", ["bookmarks:write"], ["channel_id", "bookmark_id"], ["channel_id", "bookmark_id"], { token: "either", readOnlyHint: false, destructiveHint: true }),
 
   tool("slack_usergroups_list", "usergroups.list", "List Slack user groups.", ["usergroups:read"], [], [], { token: "either", readOnlyHint: true }),
   tool("slack_usergroups_users_list", "usergroups.users.list", "List members of a Slack user group.", ["usergroups:read"], ["usergroup"], ["usergroup"], { token: "either", readOnlyHint: true }),
@@ -237,7 +255,7 @@ export const slackTools: readonly SlackTool[] = [
   tool("slack_usergroups_enable", "usergroups.enable", "Enable a Slack user group.", ["usergroups:write"], ["usergroup"], ["usergroup"], { token: "either", readOnlyHint: false }),
   tool("slack_usergroups_users_update", "usergroups.users.update", "Replace the member list for a Slack user group.", ["usergroups:write"], ["usergroup", "users"], ["usergroup", "users"], { token: "either", readOnlyHint: false }),
 
-  tool("slack_calls_add", "calls.add", "Register a new Slack call object.", ["calls:write"], ["external_id", "join_url", "title"], ["external_id", "join_url"], { token: "either", readOnlyHint: false }),
+  tool("slack_calls_add", "calls.add", "Register a new Slack call object.", ["calls:write"], ["external_unique_id", "join_url", "title"], ["external_unique_id", "join_url"], { token: "either", readOnlyHint: false }),
   tool("slack_calls_info", "calls.info", "Retrieve Slack call information.", ["calls:read"], ["id"], ["id"], { token: "either", readOnlyHint: true }),
   tool("slack_calls_update", "calls.update", "Update Slack call metadata.", ["calls:write"], ["id", "title", "join_url"], ["id"], { token: "either", readOnlyHint: false }),
   tool("slack_calls_end", "calls.end", "End a Slack call.", ["calls:write"], ["id"], ["id"], { token: "either", readOnlyHint: false, destructiveHint: true }),
@@ -246,7 +264,7 @@ export const slackTools: readonly SlackTool[] = [
 
   tool("slack_dnd_info", "dnd.info", "Retrieve DND status for the authenticated or specified user.", ["dnd:read"], ["user"], [], { token: "user", readOnlyHint: true }),
   tool("slack_dnd_team_info", "dnd.teamInfo", "Retrieve DND status for multiple workspace users.", ["dnd:read"], ["users"], [], { token: "user", readOnlyHint: true }),
-  tool("slack_dnd_set_snooze", "dnd.setSnooze", "Set a DND snooze duration for the authenticated user.", ["dnd:write"], ["time"], ["time"], { token: "user", readOnlyHint: false }),
+  tool("slack_dnd_set_snooze", "dnd.setSnooze", "Set a DND snooze duration for the authenticated user.", ["dnd:write"], ["num_minutes"], ["num_minutes"], { token: "user", readOnlyHint: false }),
   tool("slack_dnd_end_snooze", "dnd.endSnooze", "End the authenticated user's snooze mode.", ["dnd:write"], [], [], { token: "user", readOnlyHint: false }),
   tool("slack_dnd_end_dnd", "dnd.endDnd", "End the authenticated user's DND session.", ["dnd:write"], [], [], { token: "user", readOnlyHint: false }),
 

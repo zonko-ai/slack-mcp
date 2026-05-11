@@ -10,6 +10,7 @@ import {
   type SlackOAuthConfig
 } from "../slack/oauth.js";
 import { botScopesFromEnv, splitCsv, userScopesFromEnv } from "../slack/scopes.js";
+import { slackOauthSubjectId } from "./oauth-subject.js";
 
 type CloudflareSlackMcpEnv = SlackMcpRuntimeEnv & {
   readonly OAUTH_KV: KvNamespaceLike;
@@ -138,7 +139,7 @@ async function completeSlackOAuth(
   const data = await exchangeSlackOAuthCode({
     config: slackConfig,
     code,
-    fetch
+    fetch: workerFetch
   });
   if (!data.ok) {
     return htmlResponse(400, "Slack OAuth failed", data.error ?? "unknown_error");
@@ -162,7 +163,7 @@ async function completeSlackOAuth(
   const saved = await tokenStore.save(installation);
   const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
     request: stateRecord.oauthRequest,
-    userId: `${saved.teamId}:${saved.userId}`,
+    userId: slackOauthSubjectId(saved),
     metadata: {
       provider: "slack",
       teamId: saved.teamId,
@@ -183,6 +184,8 @@ async function completeSlackOAuth(
 
   return Response.redirect(redirectTo, 302);
 }
+
+const workerFetch: typeof fetch = (input, init) => fetch(input, init);
 
 function slackOAuthConfig(env: CloudflareSlackMcpEnv, request: Request): SlackOAuthConfig {
   return {

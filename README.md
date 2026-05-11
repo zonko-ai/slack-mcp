@@ -128,4 +128,12 @@ Live Slack tool coverage is opt-in because it performs real Slack API calls:
 npm run test:live-tools
 ```
 
+For a deployed OAuth-backed Worker, pass the MCP access token and endpoint:
+
+```bash
+SLACK_MCP_TEST_ENDPOINT=https://<worker-host>/mcp \
+SLACK_MCP_BEARER_TOKEN=<mcp-access-token> \
+npm run test:live-tools
+```
+
 Do not commit `.env`, `.dev.vars`, `.local`, `.wrangler`, token stores, or live tool reports.

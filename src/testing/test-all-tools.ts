@@ -16,8 +16,8 @@ type ToolResult = {
 
 type TestContext = {
   endpoint: string;
-  apiKey: string;
-  sessionId: string;
+  authorizationToken: string;
+  sessionId?: string | undefined;
   userId?: string;
   userEmail?: string;
   channelId?: string;
@@ -32,13 +32,13 @@ type TestContext = {
 };
 
 const endpoint = process.env.SLACK_MCP_TEST_ENDPOINT ?? "http://127.0.0.1:13182/mcp";
-const apiKey = process.env.SLACK_MCP_API_KEY ?? await readApiKey();
+const authorizationToken = process.env.SLACK_MCP_BEARER_TOKEN ?? process.env.SLACK_MCP_API_KEY ?? await readApiKey();
 const runId = Date.now().toString(36);
 
 const ctx: TestContext = {
   endpoint,
-  apiKey,
-  sessionId: await initialize(endpoint, apiKey),
+  authorizationToken,
+  sessionId: await initialize(endpoint, authorizationToken),
   remoteFileExternalId: `harbor-slack-mcp-${runId}`
 };
 
@@ -68,11 +68,11 @@ async function readApiKey(): Promise<string> {
   try {
     return (await readFile(".local-api-key", "utf8")).trim();
   } catch {
-    throw new Error("Set SLACK_MCP_API_KEY or keep .local-api-key from the deployment command.");
+    throw new Error("Set SLACK_MCP_BEARER_TOKEN, SLACK_MCP_API_KEY, or keep .local-api-key from the deployment command.");
   }
 }
 
-async function initialize(target: string, key: string): Promise<string> {
+async function initialize(target: string, key: string): Promise<string | undefined> {
   const response = await fetch(target, {
     method: "POST",
     headers: commonHeaders(key),
@@ -81,23 +81,27 @@ async function initialize(target: string, key: string): Promise<string> {
       id: 1,
       method: "initialize",
       params: {
-        protocolVersion: "2025-03-26",
+        protocolVersion: "2025-06-18",
         capabilities: {},
         clientInfo: { name: "slack-mcp-live-tool-tester", version: "0.1.0" }
       }
     })
   });
   const sessionId = response.headers.get("mcp-session-id");
-  if (!response.ok || !sessionId) {
+  if (!response.ok) {
     throw new Error(`Failed to initialize MCP session: ${response.status} ${await response.text()}`);
   }
-  return sessionId;
+  return sessionId ?? undefined;
 }
 
 async function callTool(ctx: TestContext, name: string, args: Json): Promise<McpResult> {
+  const headers = commonHeaders(ctx.authorizationToken);
+  if (ctx.sessionId) {
+    headers["mcp-session-id"] = ctx.sessionId;
+  }
   const response = await fetch(ctx.endpoint, {
     method: "POST",
-    headers: { ...commonHeaders(ctx.apiKey), "mcp-session-id": ctx.sessionId },
+    headers,
     body: JSON.stringify({
       jsonrpc: "2.0",
       id: `${name}-${runId}`,
@@ -105,7 +109,7 @@ async function callTool(ctx: TestContext, name: string, args: Json): Promise<Mcp
       params: { name, arguments: args }
     })
   });
-  const body = await response.json() as { readonly result?: McpResult; readonly error?: unknown };
+  const body = await readMcpJson(response) as { readonly result?: McpResult; readonly error?: unknown };
   if (!response.ok || body.error) {
     return { isError: true, content: [{ type: "text", text: JSON.stringify(body.error ?? body) }] };
   }
@@ -118,6 +122,17 @@ function commonHeaders(key: string): Record<string, string> {
     accept: "application/json, text/event-stream",
     "content-type": "application/json"
   };
+}
+
+async function readMcpJson(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (text.startsWith("event:")) {
+    const dataLine = text.split("\n").find((line) => line.startsWith("data: "));
+    if (dataLine) {
+      return JSON.parse(dataLine.slice(6));
+    }
+  }
+  return JSON.parse(text);
 }
 
 function argsFor(name: string, ctx: TestContext): Json | null {

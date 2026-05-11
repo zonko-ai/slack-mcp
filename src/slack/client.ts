@@ -41,7 +41,7 @@ export class SlackApiClient {
       throw new Error("Slack token is required");
     }
     this.token = options.token;
-    this.fetchImpl = options.fetch ?? fetch;
+    this.fetchImpl = options.fetch ?? defaultFetch;
   }
 
   async call(method: string, params: Record<string, unknown>): Promise<unknown> {
@@ -66,6 +66,8 @@ export class SlackApiClient {
     return parsed;
   }
 }
+
+const defaultFetch: SlackApiFetch = (input, init) => fetch(input, init);
 
 function encodeSlackParams(params: Record<string, unknown>): URLSearchParams {
   const body = new URLSearchParams();

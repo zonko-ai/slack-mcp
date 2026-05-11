@@ -52,4 +52,24 @@ describe("slackTools", () => {
     expect(scopes).not.toContain("admin.users.write");
     expect(scopes).not.toContain("admin.conversations.write");
   });
+
+  test("uses Slack Web API parameter names for schema-required write arguments", () => {
+    expect(requiredFields("slack_users_set_presence")).toEqual(["presence"]);
+    expect(requiredFields("slack_users_profile_set")).toEqual(["profile"]);
+    expect(requiredFields("slack_conversations_set_purpose")).toEqual(["channel", "purpose"]);
+    expect(requiredFields("slack_bookmarks_list")).toEqual(["channel_id"]);
+    expect(requiredFields("slack_bookmarks_add")).toEqual(["channel_id", "title", "type"]);
+    expect(requiredFields("slack_bookmarks_edit")).toEqual(["channel_id", "bookmark_id"]);
+    expect(requiredFields("slack_bookmarks_remove")).toEqual(["channel_id", "bookmark_id"]);
+    expect(requiredFields("slack_calls_add")).toEqual(["external_unique_id", "join_url"]);
+    expect(requiredFields("slack_dnd_set_snooze")).toEqual(["num_minutes"]);
+  });
 });
+
+function requiredFields(name: string): readonly string[] {
+  const tool = slackTools.find((candidate) => candidate.name === name);
+  if (!tool) {
+    throw new Error(`Missing Slack tool ${name}`);
+  }
+  return tool.inputSchema.required ?? [];
+}
