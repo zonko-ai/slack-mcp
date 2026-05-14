@@ -86,8 +86,17 @@ describe("OAuth HTTP handler", () => {
     expect(callback.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledWith("https://slack.com/api/oauth.v2.access", {
       method: "POST",
+      headers: {
+        authorization: `Basic ${btoa("111.222:secret")}`
+      },
       body: expect.any(URLSearchParams)
     });
+    const tokenCall = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const tokenBody = tokenCall[1].body;
+    expect(tokenBody).toBeInstanceOf(URLSearchParams);
+    expect((tokenBody as URLSearchParams).get("client_id")).toBeNull();
+    expect((tokenBody as URLSearchParams).get("client_secret")).toBeNull();
+    expect((tokenBody as URLSearchParams).get("code")).toBe("abc");
     expect(save).toHaveBeenCalledWith({
       teamId: "T123",
       teamName: "Example",

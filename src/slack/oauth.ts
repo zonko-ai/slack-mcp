@@ -57,12 +57,14 @@ export async function exchangeSlackOAuthCode(params: {
 }): Promise<SlackOAuthAccessResponse> {
   const body = new URLSearchParams({
     code: params.code,
-    client_id: params.config.clientId,
-    client_secret: params.config.clientSecret,
     redirect_uri: params.config.redirectUri
   });
+  const credentials = btoa(`${params.config.clientId}:${params.config.clientSecret}`);
   const response = await params.fetch("https://slack.com/api/oauth.v2.access", {
     method: "POST",
+    headers: {
+      authorization: `Basic ${credentials}`
+    },
     body
   });
   return (await response.json()) as SlackOAuthAccessResponse;
