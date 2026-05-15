@@ -11,6 +11,11 @@ export type SlackOAuthConfig = {
 export type SlackOAuthAccessResponse = {
   readonly ok?: boolean;
   readonly error?: string;
+  readonly warning?: string;
+  readonly response_metadata?: {
+    readonly messages?: readonly string[];
+    readonly warnings?: readonly string[];
+  };
   readonly access_token?: string;
   readonly refresh_token?: string;
   readonly expires_in?: number;
@@ -63,7 +68,8 @@ export async function exchangeSlackOAuthCode(params: {
   const response = await params.fetch("https://slack.com/api/oauth.v2.access", {
     method: "POST",
     headers: {
-      authorization: `Basic ${credentials}`
+      authorization: `Basic ${credentials}`,
+      "content-type": "application/x-www-form-urlencoded"
     },
     body
   });

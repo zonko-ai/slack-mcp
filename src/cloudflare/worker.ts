@@ -146,6 +146,15 @@ async function completeSlackOAuth(
     fetch: workerFetch
   });
   if (!data.ok) {
+    console.warn("slack_oauth_exchange_failed", {
+      error: data.error ?? null,
+      warning: data.warning ?? null,
+      responseMessages: data.response_metadata?.messages ?? [],
+      responseWarnings: data.response_metadata?.warnings ?? [],
+      redirectOrigin: new URL(slackConfig.redirectUri).origin,
+      userScopeCount: slackConfig.userScopes.length,
+      botScopeCount: slackConfig.botScopes.length
+    });
     return htmlResponse(400, "Slack OAuth failed", data.error ?? "unknown_error");
   }
 

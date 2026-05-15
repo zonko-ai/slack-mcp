@@ -62,6 +62,10 @@ export class SlackToolRunner {
       const client = new SlackApiClient(
         this.fetchImpl === undefined ? { token } : { token, fetch: this.fetchImpl }
       );
+      if (tool.method === "harbor.unreadMessages") {
+        const result = await fetchUnreadMessages(client, call.arguments);
+        return { content: [{ type: "text", text: JSON.stringify(redactSensitiveSlackData(result), null, 2) }] };
+      }
       const result = await client.call(tool.method, sanitizeArguments(call.arguments));
       return { content: [{ type: "text", text: JSON.stringify(redactSensitiveSlackData(result), null, 2) }] };
     } catch (error) {
@@ -244,4 +248,225 @@ function isSensitiveResponseKey(key: string): boolean {
 
 function redactTokenString(value: string): string {
   return value.replace(SLACK_TOKEN_PATTERN, "[redacted]");
+}
+
+type SlackConversation = {
+  readonly id?: string;
+  readonly name?: string;
+  readonly is_channel?: boolean;
+  readonly is_group?: boolean;
+  readonly is_im?: boolean;
+  readonly is_mpim?: boolean;
+  readonly is_private?: boolean;
+  readonly user?: string;
+  readonly last_read?: string;
+  readonly unread_count?: number;
+  readonly unread_count_display?: number;
+};
+
+type SlackConversationsListResponse = {
+  readonly channels?: readonly SlackConversation[];
+  readonly response_metadata?: {
+    readonly next_cursor?: string;
+  };
+};
+
+type SlackConversationInfoResponse = {
+  readonly channel?: SlackConversation;
+};
+
+type SlackConversationHistoryResponse = {
+  readonly messages?: readonly unknown[];
+  readonly has_more?: boolean;
+  readonly response_metadata?: {
+    readonly next_cursor?: string;
+  };
+};
+
+type UnreadConversationResult = {
+  readonly id: string;
+  readonly name?: string | undefined;
+  readonly type: string;
+  readonly unread_count?: number | undefined;
+  readonly last_read?: string | undefined;
+  readonly has_more?: boolean | undefined;
+  readonly messages: readonly unknown[];
+};
+
+type SkippedConversationResult = {
+  readonly id: string;
+  readonly name?: string | undefined;
+  readonly type: string;
+  readonly reason: string;
+};
+
+async function fetchUnreadMessages(
+  client: SlackApiClient,
+  rawArguments: Record<string, unknown>
+): Promise<{
+  readonly ok: true;
+  readonly scanned_conversations: number;
+  readonly unread_conversations: number;
+  readonly conversations: readonly UnreadConversationResult[];
+  readonly skipped: readonly SkippedConversationResult[];
+}> {
+  const args = sanitizeArguments(rawArguments);
+  const types = stringArg(args.types) ?? "public_channel,private_channel,mpim,im";
+  const maxConversations = clampNumber(numberArg(args.max_conversations) ?? numberArg(args.limit) ?? 50, 1, 200);
+  const messagesPerConversation = clampNumber(numberArg(args.messages_per_conversation) ?? 20, 1, 100);
+
+  const conversations = await listConversations(client, types, maxConversations);
+  const unread: UnreadConversationResult[] = [];
+  const skipped: SkippedConversationResult[] = [];
+
+  for (const conversation of conversations) {
+    const id = conversation.id;
+    if (!id) {
+      continue;
+    }
+
+    let detailed = conversation;
+    try {
+      const info = await client.call("conversations.info", { channel: id }) as SlackConversationInfoResponse;
+      detailed = { ...conversation, ...info.channel };
+    } catch (error) {
+      skipped.push({
+        id,
+        name: conversation.name,
+        type: conversationType(conversation),
+        reason: error instanceof SlackApiError ? `conversations.info failed: ${error.slackError}` : "conversations.info failed"
+      });
+      continue;
+    }
+
+    const unreadCount = numericUnreadCount(detailed);
+    const lastRead = stringArg(detailed.last_read);
+    if (unreadCount === 0) {
+      skipped.push({
+        id,
+        name: detailed.name,
+        type: conversationType(detailed),
+        reason: "Slack reported no unread messages"
+      });
+      continue;
+    }
+    if (unreadCount === undefined && !lastRead) {
+      skipped.push({
+        id,
+        name: detailed.name,
+        type: conversationType(detailed),
+        reason: "Slack did not expose unread_count or last_read for this conversation"
+      });
+      continue;
+    }
+
+    const historyArgs: Record<string, unknown> = {
+      channel: id,
+      limit: messagesPerConversation
+    };
+    if (lastRead) {
+      historyArgs.oldest = lastRead;
+      historyArgs.inclusive = false;
+    }
+
+    const history = await client.call("conversations.history", historyArgs) as SlackConversationHistoryResponse;
+    const messages = history.messages ?? [];
+    if (messages.length === 0) {
+      skipped.push({
+        id,
+        name: detailed.name,
+        type: conversationType(detailed),
+        reason: "No messages were returned after the last-read cursor"
+      });
+      continue;
+    }
+
+    unread.push({
+      id,
+      name: detailed.name,
+      type: conversationType(detailed),
+      unread_count: unreadCount,
+      last_read: lastRead,
+      has_more: history.has_more,
+      messages
+    });
+  }
+
+  return {
+    ok: true,
+    scanned_conversations: conversations.length,
+    unread_conversations: unread.length,
+    conversations: unread,
+    skipped
+  };
+}
+
+async function listConversations(
+  client: SlackApiClient,
+  types: string,
+  maxConversations: number
+): Promise<readonly SlackConversation[]> {
+  const conversations: SlackConversation[] = [];
+  let cursor: string | undefined;
+
+  while (conversations.length < maxConversations) {
+    const remaining = maxConversations - conversations.length;
+    const page = await client.call("conversations.list", {
+      types,
+      limit: Math.min(remaining, 200),
+      ...(cursor ? { cursor } : {})
+    }) as SlackConversationsListResponse;
+    conversations.push(...(page.channels ?? []).slice(0, remaining));
+    cursor = page.response_metadata?.next_cursor?.trim() || undefined;
+    if (!cursor) {
+      break;
+    }
+  }
+
+  return conversations;
+}
+
+function numericUnreadCount(conversation: SlackConversation): number | undefined {
+  if (typeof conversation.unread_count_display === "number") {
+    return conversation.unread_count_display;
+  }
+  if (typeof conversation.unread_count === "number") {
+    return conversation.unread_count;
+  }
+  return undefined;
+}
+
+function conversationType(conversation: SlackConversation): string {
+  if (conversation.is_im) {
+    return "im";
+  }
+  if (conversation.is_mpim) {
+    return "mpim";
+  }
+  if (conversation.is_group || conversation.is_private) {
+    return "private_channel";
+  }
+  if (conversation.is_channel) {
+    return "public_channel";
+  }
+  return "conversation";
+}
+
+function stringArg(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function numberArg(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.trunc(value)));
 }

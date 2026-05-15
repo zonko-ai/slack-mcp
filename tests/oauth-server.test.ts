@@ -87,7 +87,8 @@ describe("OAuth HTTP handler", () => {
     expect(fetchMock).toHaveBeenCalledWith("https://slack.com/api/oauth.v2.access", {
       method: "POST",
       headers: {
-        authorization: `Basic ${btoa("111.222:secret")}`
+        authorization: `Basic ${btoa("111.222:secret")}`,
+        "content-type": "application/x-www-form-urlencoded"
       },
       body: expect.any(URLSearchParams)
     });

@@ -117,4 +117,107 @@ describe("SlackToolRunner", () => {
       })
     );
   });
+
+  test("fetches unread message content with the high-level unread workflow", async () => {
+    const tokenStore: TokenStore = {
+      save: vi.fn(),
+      get: vi.fn(),
+      getDefault: vi.fn(async () => ({
+        connectionId: "T123:U123",
+        teamId: "T123",
+        teamName: "Example",
+        enterpriseId: null,
+        userId: "U123",
+        accessToken: "xoxp-installed-token",
+        scope: "channels:read,channels:history,im:read,im:history",
+        tokenType: "user" as const,
+        createdAt: "2026-05-11T00:00:00.000Z",
+        updatedAt: "2026-05-11T00:00:00.000Z"
+      })),
+      listSummaries: vi.fn()
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const method = String(input).replace("https://slack.com/api/", "");
+      const body = init?.body as URLSearchParams;
+      if (method === "conversations.list") {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            channels: [
+              { id: "C1", name: "general", is_channel: true },
+              { id: "D1", is_im: true, user: "U999", unread_count_display: 0 }
+            ],
+            response_metadata: { next_cursor: "" }
+          }),
+          { headers: { "content-type": "application/json" } }
+        );
+      }
+      if (method === "conversations.info" && body.get("channel") === "C1") {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            channel: {
+              id: "C1",
+              name: "general",
+              is_channel: true,
+              unread_count_display: 2,
+              last_read: "1710000000.000100"
+            }
+          }),
+          { headers: { "content-type": "application/json" } }
+        );
+      }
+      if (method === "conversations.info" && body.get("channel") === "D1") {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            channel: {
+              id: "D1",
+              is_im: true,
+              user: "U999",
+              unread_count_display: 0,
+              last_read: "1710000000.000200"
+            }
+          }),
+          { headers: { "content-type": "application/json" } }
+        );
+      }
+      if (method === "conversations.history") {
+        expect(body.get("channel")).toBe("C1");
+        expect(body.get("oldest")).toBe("1710000000.000100");
+        expect(body.get("inclusive")).toBe("false");
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            messages: [{ ts: "1710000001.000100", text: "unread hello" }],
+            has_more: false
+          }),
+          { headers: { "content-type": "application/json" } }
+        );
+      }
+      throw new Error(`Unexpected Slack method: ${method}`);
+    });
+    const runner = new SlackToolRunner({ tokenStore, fetch: fetchMock });
+
+    const result = await runner.callTool({
+      name: "slack_unread_messages",
+      arguments: { max_conversations: 10, messages_per_conversation: 5 }
+    });
+
+    expect(result.isError).toBeUndefined();
+    const payload = JSON.parse(result.content[0]?.text ?? "{}");
+    expect(payload.scanned_conversations).toBe(2);
+    expect(payload.unread_conversations).toBe(1);
+    expect(payload.conversations[0]).toMatchObject({
+      id: "C1",
+      name: "general",
+      unread_count: 2,
+      last_read: "1710000000.000100",
+      messages: [{ ts: "1710000001.000100", text: "unread hello" }]
+    });
+    expect(payload.skipped[0]).toMatchObject({
+      id: "D1",
+      reason: "Slack reported no unread messages"
+    });
+  });
 });

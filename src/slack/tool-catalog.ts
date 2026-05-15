@@ -38,6 +38,8 @@ type FieldName =
   | "join_url"
   | "latest"
   | "limit"
+  | "max_conversations"
+  | "messages_per_conversation"
   | "link"
   | "description"
   | "bookmark_id"
@@ -88,6 +90,8 @@ const fieldSchemas: Record<FieldName, unknown> = {
   join_url: { type: "string", description: "Call join URL." },
   latest: { type: "string", description: "Latest timestamp bound." },
   limit: { type: "number", description: "Maximum number of records to return." },
+  max_conversations: { type: "number", description: "Maximum number of conversations to scan." },
+  messages_per_conversation: { type: "number", description: "Maximum unread messages to fetch per conversation." },
   link: { type: "string", description: "Slack bookmark link URL." },
   description: { type: "string", description: "Description text." },
   bookmark_id: { type: "string", description: "Slack bookmark id." },
@@ -184,6 +188,7 @@ export const slackTools: readonly SlackTool[] = [
   tool("slack_conversations_members", "conversations.members", "List member ids for a Slack conversation.", ["channels:read", "groups:read", "im:read", "mpim:read"], ["channel", "cursor", "limit"], ["channel"], { token: "either", readOnlyHint: true }),
   tool("slack_conversations_history", "conversations.history", "Fetch message history for a Slack conversation.", ["channels:history", "groups:history", "im:history", "mpim:history"], ["channel", "cursor", "inclusive", "latest", "limit", "oldest"], ["channel"], { token: "either", readOnlyHint: true }),
   tool("slack_conversations_replies", "conversations.replies", "Fetch replies for a parent message in a Slack conversation.", ["channels:history", "groups:history", "im:history", "mpim:history"], ["channel", "ts", "cursor", "inclusive", "latest", "limit", "oldest"], ["channel", "ts"], { token: "either", readOnlyHint: true }),
+  tool("slack_unread_messages", "harbor.unreadMessages", "Scan visible Slack conversations and fetch unread message content when Slack exposes unread state or a last-read cursor.", ["channels:read", "groups:read", "im:read", "mpim:read", "channels:history", "groups:history", "im:history", "mpim:history"], ["types", "max_conversations", "messages_per_conversation"], [], { token: "user", readOnlyHint: true }),
   tool("slack_conversations_open", "conversations.open", "Open or resume a DM or MPIM with one or more users.", ["im:write", "mpim:write"], ["channel", "users"], [], { token: "user", readOnlyHint: false }),
   tool("slack_conversations_close", "conversations.close", "Close a DM or MPIM in the authenticated user's sidebar.", ["im:write", "mpim:write"], ["channel"], ["channel"], { token: "user", readOnlyHint: false }),
   tool("slack_conversations_create", "conversations.create", "Create a public or private Slack channel.", ["channels:write", "groups:write"], ["name"], ["name"], { token: "either", readOnlyHint: false }),
