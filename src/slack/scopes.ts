@@ -26,18 +26,7 @@ export function userScopesFromEnv(value: string | undefined): readonly string[] 
 }
 
 export function botScopesFromEnv(value: string | undefined): readonly string[] {
-  const explicit = splitCsv(value);
-  if (explicit.length > 0) {
-    return explicit;
-  }
-  return Array.from(
-    new Set(
-      slackTools
-        .filter((tool) => tool.annotations.token === "bot")
-        .flatMap((tool) => tool.annotations.scopes)
-        .filter(isRealOAuthScope)
-    )
-  ).sort();
+  return splitCsv(value);
 }
 
 function isRealOAuthScope(scope: string): boolean {
