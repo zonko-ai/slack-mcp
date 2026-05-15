@@ -166,7 +166,7 @@ function argsFor(name: string, ctx: TestContext): Json | null {
     case "slack_users_set_presence":
       return { presence: "auto" };
     case "slack_users_profile_set":
-      return { profile: JSON.stringify({ status_text: "Slack MCP test", status_emoji: ":white_check_mark:" }) };
+      return { profile: { status_text: "Slack MCP test", status_emoji: ":white_check_mark:" } };
     case "slack_users_delete_photo":
       return {};
 
@@ -221,7 +221,7 @@ function argsFor(name: string, ctx: TestContext): Json | null {
     case "slack_chat_get_permalink":
       return channel && ts ? { channel, message_ts: ts } : null;
     case "slack_chat_unfurl":
-      return channel && ts ? { channel, ts, unfurls: JSON.stringify({ "https://example.com": { text: "Slack MCP unfurl test" } }) } : null;
+      return channel && ts ? { channel, ts, unfurls: { "https://example.com": { text: "Slack MCP unfurl test" } } } : null;
     case "slack_search_messages":
       return { query: "Slack MCP", count: 5 };
 

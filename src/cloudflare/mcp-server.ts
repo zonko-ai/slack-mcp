@@ -5,7 +5,11 @@ import {
   normalizeSessionTtlSeconds,
   type McpSessionKvNamespace
 } from "./mcp-session-store.js";
-import { slackTools, type SlackTool } from "../slack/tool-catalog.js";
+import {
+  filterSlackToolsForInstallation,
+  slackTools,
+  type SlackTool
+} from "../slack/tool-catalog.js";
 import { SlackToolRunner, type ToolCallResult } from "../slack/tool-runner.js";
 import type { SlackTokenRotationConfig } from "../slack/token-rotation.js";
 
@@ -185,11 +189,12 @@ async function handleJsonRpcMessage(input: {
     case "ping":
       return { jsonrpc: "2.0", id, result: {} };
     case "tools/list":
+      const visibleTools = await visibleSlackTools(input.env, input.connectionId);
       return {
         jsonrpc: "2.0",
         id,
         result: {
-          tools: slackTools.map((tool) => mcpToolDefinition(tool))
+          tools: visibleTools.map((tool) => mcpToolDefinition(tool))
         }
       };
     case "tools/call":
@@ -201,6 +206,15 @@ async function handleJsonRpcMessage(input: {
     default:
       return jsonRpcError(id, -32601, `Method not found: ${String(input.message.method)}`);
   }
+}
+
+async function visibleSlackTools(env: SlackMcpRuntimeEnv, connectionId: string): Promise<readonly SlackTool[]> {
+  const tokenStore = new D1TokenStore({
+    db: env.DB,
+    encryptionKey: env.TOKEN_ENCRYPTION_KEY
+  });
+  const installation = await tokenStore.get(connectionId);
+  return installation ? filterSlackToolsForInstallation(slackTools, installation) : [];
 }
 
 function mcpToolDefinition(tool: SlackTool) {

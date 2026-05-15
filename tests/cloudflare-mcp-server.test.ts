@@ -85,7 +85,7 @@ async function encryptedSlackToken(value: string): Promise<string> {
   });
 }
 
-async function slackInstallationRow(): Promise<SlackInstallationRow> {
+async function slackInstallationRow(overrides: Partial<SlackInstallationRow> = {}): Promise<SlackInstallationRow> {
   const now = "2026-05-11T12:00:00.000Z";
   return {
     connection_id: "T123:U123",
@@ -103,7 +103,8 @@ async function slackInstallationRow(): Promise<SlackInstallationRow> {
     bot_scope: null,
     token_type: "user",
     created_at: now,
-    updated_at: now
+    updated_at: now,
+    ...overrides
   };
 }
 
@@ -184,11 +185,9 @@ describe("Cloudflare MCP server adapter", () => {
     const sessionKv = new MemoryKvNamespace();
     const handler = createSlackMcpHttpHandler(
       {
-        DB: {
-          prepare() {
-            throw new Error("D1 should not be touched for tools/list");
-          }
-        },
+        DB: new SingleInstallationDb(await slackInstallationRow({
+          scope: "auth.test,api.test,chat:write,team:read"
+        })),
         TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
         SESSION_KV: sessionKv,
         SLACK_MCP_SESSION_TTL_SECONDS: "60"
@@ -247,9 +246,13 @@ describe("Cloudflare MCP server adapter", () => {
         }>;
       };
     };
+    const toolNames = new Set((body.result?.tools ?? []).map((tool) => tool.name));
     const apiTestTool = body.result?.tools?.find((tool) => tool.name === "slack_api_test");
     expect(apiTestTool).toBeTruthy();
     expect(apiTestTool?.annotations?.readOnlyHint).toBe(true);
+    expect(toolNames.has("slack_chat_post_message")).toBe(true);
+    expect(toolNames.has("slack_admin_users_list")).toBe(false);
+    expect(toolNames.has("slack_files_remote_add")).toBe(false);
 
     const standaloneSse = await handler(
       new Request("https://slack-mcp.example.com/mcp", {

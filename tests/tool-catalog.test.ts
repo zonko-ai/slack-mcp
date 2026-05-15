@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { slackTools } from "../src/slack/tool-catalog.js";
+import {
+  isSlackToolAvailableForInstallation,
+  slackTools
+} from "../src/slack/tool-catalog.js";
 
 describe("slackTools", () => {
   test("exposes a broad Composio-relevant Slack tool surface with unique MCP names", () => {
@@ -64,12 +67,49 @@ describe("slackTools", () => {
     expect(requiredFields("slack_calls_add")).toEqual(["external_unique_id", "join_url"]);
     expect(requiredFields("slack_dnd_set_snooze")).toEqual(["num_minutes"]);
   });
+
+  test("declares structured schemas for Slack JSON payload fields", () => {
+    expect(fieldType("slack_chat_post_message", "blocks")).toBe("array");
+    expect(fieldType("slack_chat_post_message", "attachments")).toBe("array");
+    expect(fieldType("slack_users_profile_set", "profile")).toBe("object");
+    expect(fieldType("slack_chat_unfurl", "unfurls")).toBe("object");
+  });
+
+  test("matches Slack tools to installation token availability and granted scopes", () => {
+    const installation = {
+      connectionId: "T123:U123",
+      teamId: "T123",
+      teamName: "Example",
+      enterpriseId: null,
+      userId: "U123",
+      accessToken: "xoxp-installed-token",
+      scope: "auth.test,api.test,chat:write,channels:read",
+      tokenType: "user" as const,
+      createdAt: "2026-05-11T00:00:00.000Z",
+      updatedAt: "2026-05-11T00:00:00.000Z"
+    };
+
+    expect(isSlackToolAvailableForInstallation(toolByName("slack_chat_post_message"), installation)).toBe(true);
+    expect(isSlackToolAvailableForInstallation(toolByName("slack_admin_users_list"), installation)).toBe(false);
+    expect(isSlackToolAvailableForInstallation(toolByName("slack_files_remote_add"), installation)).toBe(false);
+  });
 });
 
 function requiredFields(name: string): readonly string[] {
+  return toolByName(name).inputSchema.required ?? [];
+}
+
+function fieldType(toolName: string, fieldName: string): unknown {
+  const field = toolByName(toolName).inputSchema.properties[fieldName];
+  return typeof field === "object" && field !== null && "type" in field
+    ? (field as { readonly type?: unknown }).type
+    : undefined;
+}
+
+function toolByName(name: string) {
   const tool = slackTools.find((candidate) => candidate.name === name);
   if (!tool) {
     throw new Error(`Missing Slack tool ${name}`);
   }
-  return tool.inputSchema.required ?? [];
+  return tool;
 }

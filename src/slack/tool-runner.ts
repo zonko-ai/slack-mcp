@@ -1,5 +1,11 @@
 import { SlackApiClient, SlackApiError } from "./client.js";
-import { findSlackTool, type SlackTool } from "./tool-catalog.js";
+import {
+  findSlackTool,
+  parseSlackScopes,
+  slackToolTokenKindsForInstallation,
+  type SlackTool,
+  type SlackToolTokenKind
+} from "./tool-catalog.js";
 import type { SlackInstallation, SlackInstallationInput, TokenStore } from "./token-store.js";
 import {
   refreshSlackToken,
@@ -58,6 +64,10 @@ export class SlackToolRunner {
     }
 
     try {
+      const validationError = validateToolCall(tool, call.arguments);
+      if (validationError) {
+        return { isError: true, content: [{ type: "text", text: validationError }] };
+      }
       const token = await this.accessTokenForTool(tool, installation);
       const client = new SlackApiClient(
         this.fetchImpl === undefined ? { token } : { token, fetch: this.fetchImpl }
@@ -107,6 +117,30 @@ export class SlackToolRunner {
           ]
         };
       }
+      if (error instanceof SlackToolAccessError) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  error: "missing_required_access",
+                  message: error.message,
+                  tool: error.tool.name,
+                  required_scopes: error.tool.annotations.scopes,
+                  token: error.tool.annotations.token,
+                  provided_user_scopes: Array.from(parseSlackScopes(error.installation.scope)).sort(),
+                  provided_bot_scopes: Array.from(parseSlackScopes(error.installation.botScope ?? "")).sort(),
+                  has_bot_token: Boolean(error.installation.botAccessToken)
+                },
+                null,
+                2
+              )
+            }
+          ]
+        };
+      }
       throw error;
     }
   }
@@ -139,7 +173,7 @@ export class SlackToolRunner {
 }
 
 type SelectedInstallationToken = {
-  readonly kind: "user" | "bot";
+  readonly kind: SlackToolTokenKind;
   readonly accessToken: string;
   readonly refreshToken?: string | undefined;
   readonly expiresAt?: string | undefined;
@@ -153,7 +187,13 @@ type RefreshedInstallationToken = {
 };
 
 function selectInstallationToken(tool: SlackTool, installation: SlackInstallation): SelectedInstallationToken {
-  if (tool.annotations.token === "bot" && installation.botAccessToken) {
+  const allowedTokenKinds = slackToolTokenKindsForInstallation(tool, installation);
+  if (allowedTokenKinds.length === 0) {
+    throw new SlackToolAccessError(tool, installation);
+  }
+
+  const selectedTokenKind = allowedTokenKinds[0];
+  if (selectedTokenKind === "bot" && installation.botAccessToken) {
     return {
       kind: "bot",
       accessToken: installation.botAccessToken,
@@ -168,6 +208,18 @@ function selectInstallationToken(tool: SlackTool, installation: SlackInstallatio
     refreshToken: installation.userRefreshToken,
     expiresAt: installation.userTokenExpiresAt
   };
+}
+
+class SlackToolAccessError extends Error {
+  readonly tool: SlackTool;
+  readonly installation: SlackInstallation;
+
+  constructor(tool: SlackTool, installation: SlackInstallation) {
+    super(`Slack installation is missing required access for ${tool.name}.`);
+    this.name = "SlackToolAccessError";
+    this.tool = tool;
+    this.installation = installation;
+  }
 }
 
 function installationInputWithRefreshedToken(
@@ -200,6 +252,35 @@ function optionalStringField<Key extends keyof SlackInstallationInput>(
 }
 
 const defaultFetch: typeof fetch = (input, init) => fetch(input, init);
+
+const MESSAGE_BODY_METHODS = new Set([
+  "chat.postMessage",
+  "chat.postEphemeral",
+  "chat.update",
+  "chat.scheduleMessage"
+]);
+
+function validateToolCall(tool: SlackTool, argumentsObject: Record<string, unknown>): string | null {
+  if (!MESSAGE_BODY_METHODS.has(tool.method)) {
+    return null;
+  }
+  if (hasUsableMessageBody(argumentsObject)) {
+    return null;
+  }
+  return `${tool.name} requires text, blocks, or attachments.`;
+}
+
+function hasUsableMessageBody(argumentsObject: Record<string, unknown>): boolean {
+  return (
+    stringArg(argumentsObject.text) !== undefined ||
+    nonEmptyArrayArg(argumentsObject.blocks) ||
+    nonEmptyArrayArg(argumentsObject.attachments)
+  );
+}
+
+function nonEmptyArrayArg(value: unknown): boolean {
+  return Array.isArray(value) && value.length > 0;
+}
 
 function sanitizeArguments(argumentsObject: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(

@@ -17,7 +17,7 @@ describe("SlackApiClient", () => {
       method: "POST",
       headers: {
         authorization: "Bearer xoxp-test",
-        "content-type": "application/x-www-form-urlencoded; charset=utf-8"
+        "content-type": "application/x-www-form-urlencoded"
       },
       body: new URLSearchParams({ channel: "C123" })
     });

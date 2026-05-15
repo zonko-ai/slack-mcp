@@ -21,6 +21,14 @@ export type SlackTool = {
   readonly annotations: SlackToolAnnotations;
 };
 
+export type SlackInstallationAccess = {
+  readonly scope: string;
+  readonly botScope?: string | undefined;
+  readonly botAccessToken?: string | undefined;
+};
+
+export type SlackToolTokenKind = "user" | "bot";
+
 type FieldName =
   | "attachments"
   | "blocks"
@@ -74,8 +82,16 @@ type FieldName =
   | "users";
 
 const fieldSchemas: Record<FieldName, unknown> = {
-  attachments: { type: "string", description: "JSON-encoded Slack attachments." },
-  blocks: { type: "string", description: "JSON-encoded Slack Block Kit blocks." },
+  attachments: {
+    type: "array",
+    description: "Slack message attachments as an array of attachment objects.",
+    items: { type: "object", additionalProperties: true }
+  },
+  blocks: {
+    type: "array",
+    description: "Slack Block Kit blocks as an array of block objects.",
+    items: { type: "object", additionalProperties: true }
+  },
   channel: { type: "string", description: "Slack channel, conversation, DM, or MPIM id." },
   channels: { type: "string", description: "Comma-separated Slack channel ids." },
   cursor: { type: "string", description: "Pagination cursor returned by Slack." },
@@ -101,7 +117,7 @@ const fieldSchemas: Record<FieldName, unknown> = {
   num_minutes: { type: "number", description: "Number of minutes." },
   post_at: { type: "number", description: "Unix timestamp for scheduled delivery." },
   presence: { type: "string", description: "Slack presence value." },
-  profile: { type: "string", description: "JSON-encoded Slack profile object." },
+  profile: { type: "object", description: "Slack profile fields object.", additionalProperties: true },
   purpose: { type: "string", description: "Slack channel purpose text." },
   query: { type: "string", description: "Search query." },
   channel_id: { type: "string", description: "Slack channel id." },
@@ -119,7 +135,7 @@ const fieldSchemas: Record<FieldName, unknown> = {
   ts_from: { type: "string", description: "Start timestamp for file or message filtering." },
   ts_to: { type: "string", description: "End timestamp for file or message filtering." },
   types: { type: "string", description: "Comma-separated Slack object types." },
-  unfurls: { type: "string", description: "JSON-encoded unfurl map." },
+  unfurls: { type: "object", description: "Slack unfurl map keyed by URL.", additionalProperties: true },
   url: { type: "string", description: "URL." },
   user: { type: "string", description: "Slack user id." },
   usergroup: { type: "string", description: "Slack user group id." },
@@ -283,6 +299,60 @@ export const slackTools: readonly SlackTool[] = [
 
 export function findSlackTool(name: string): SlackTool | undefined {
   return slackTools.find((toolDefinition) => toolDefinition.name === name);
+}
+
+export function filterSlackToolsForInstallation(
+  tools: readonly SlackTool[],
+  installation: SlackInstallationAccess
+): readonly SlackTool[] {
+  return tools.filter((toolDefinition) => isSlackToolAvailableForInstallation(toolDefinition, installation));
+}
+
+export function isSlackToolAvailableForInstallation(
+  toolDefinition: SlackTool,
+  installation: SlackInstallationAccess
+): boolean {
+  return slackToolTokenKindsForInstallation(toolDefinition, installation).length > 0;
+}
+
+export function slackToolTokenKindsForInstallation(
+  toolDefinition: SlackTool,
+  installation: SlackInstallationAccess
+): readonly SlackToolTokenKind[] {
+  const requiredScopes = toolDefinition.annotations.scopes;
+  const userScopes = parseSlackScopes(installation.scope);
+  const botScopes = parseSlackScopes(installation.botScope ?? "");
+  const userCanRun = hasRequiredSlackScopes(requiredScopes, userScopes);
+  const botCanRun = Boolean(installation.botAccessToken) && hasRequiredSlackScopes(requiredScopes, botScopes);
+
+  switch (toolDefinition.annotations.token) {
+    case "bot":
+      return botCanRun ? ["bot"] : [];
+    case "user":
+    case "admin":
+      return userCanRun ? ["user"] : [];
+    case "either":
+      return [
+        ...(userCanRun ? ["user" as const] : []),
+        ...(botCanRun ? ["bot" as const] : [])
+      ];
+  }
+}
+
+export function parseSlackScopes(scopeText: string): ReadonlySet<string> {
+  return new Set(
+    scopeText
+      .split(/[,\s]+/u)
+      .map((scope) => scope.trim())
+      .filter((scope) => scope.length > 0)
+  );
+}
+
+function hasRequiredSlackScopes(requiredScopes: readonly string[], grantedScopes: ReadonlySet<string>): boolean {
+  if (requiredScopes.includes("none")) {
+    return true;
+  }
+  return requiredScopes.every((scope) => grantedScopes.has(scope));
 }
 
 function isReadOnlyMethod(method: string): boolean {

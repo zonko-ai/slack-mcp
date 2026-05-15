@@ -129,7 +129,7 @@ describe("SlackToolRunner", () => {
         enterpriseId: null,
         userId: "U123",
         accessToken: "xoxp-installed-token",
-        scope: "channels:read,channels:history,im:read,im:history",
+        scope: "channels:read,channels:history,groups:read,groups:history,im:read,im:history,mpim:read,mpim:history",
         tokenType: "user" as const,
         createdAt: "2026-05-11T00:00:00.000Z",
         updatedAt: "2026-05-11T00:00:00.000Z"
@@ -219,5 +219,67 @@ describe("SlackToolRunner", () => {
       id: "D1",
       reason: "Slack reported no unread messages"
     });
+  });
+
+  test("rejects tools that the Slack installation cannot run before calling Slack", async () => {
+    const tokenStore: TokenStore = {
+      save: vi.fn(),
+      get: vi.fn(),
+      getDefault: vi.fn(async () => ({
+        connectionId: "T123:U123",
+        teamId: "T123",
+        teamName: "Example",
+        enterpriseId: null,
+        userId: "U123",
+        accessToken: "xoxp-installed-token",
+        scope: "chat:write",
+        tokenType: "user" as const,
+        createdAt: "2026-05-11T00:00:00.000Z",
+        updatedAt: "2026-05-11T00:00:00.000Z"
+      })),
+      listSummaries: vi.fn()
+    };
+    const fetchMock = vi.fn();
+    const runner = new SlackToolRunner({ tokenStore, fetch: fetchMock });
+
+    const result = await runner.callTool({
+      name: "slack_admin_users_list",
+      arguments: {}
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain("Slack installation is missing required access");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("validates message tools before calling Slack", async () => {
+    const tokenStore: TokenStore = {
+      save: vi.fn(),
+      get: vi.fn(),
+      getDefault: vi.fn(async () => ({
+        connectionId: "T123:U123",
+        teamId: "T123",
+        teamName: "Example",
+        enterpriseId: null,
+        userId: "U123",
+        accessToken: "xoxp-installed-token",
+        scope: "chat:write",
+        tokenType: "user" as const,
+        createdAt: "2026-05-11T00:00:00.000Z",
+        updatedAt: "2026-05-11T00:00:00.000Z"
+      })),
+      listSummaries: vi.fn()
+    };
+    const fetchMock = vi.fn();
+    const runner = new SlackToolRunner({ tokenStore, fetch: fetchMock });
+
+    const result = await runner.callTool({
+      name: "slack_chat_post_message",
+      arguments: { channel: "C123" }
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain("requires text, blocks, or attachments");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
